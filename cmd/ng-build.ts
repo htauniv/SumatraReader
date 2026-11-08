@@ -18,12 +18,14 @@ import {
   buildTarget,
   cleanOutDir,
   depsOf,
+  exeName,
   mergeEnv,
   outDir,
   outDirName,
   root,
   stageShared,
   type BuildFlags,
+  type MacArch,
 } from "./helper/ng-compile";
 import { defaultTarget, findTarget, targetsFor } from "./helper/ng-targets";
 import { runBuildInWsl } from "./helper/ng-wsl";
@@ -41,6 +43,10 @@ Configuration (one required):
 Options:
   -linux            build for Linux; from Windows this reruns in WSL Ubuntu
   -mac              build for macOS (macOS host only)
+  -arch <a>         macOS: x86_64, arm64 or universal. Cross-compiling works
+                    from either host; universal builds both and lipos them
+                    into one app (out/mac/rel), each slice kept in its own
+                    out/mac/rel-<arch> so rebuilds stay incremental
   -wasm             build for the browser with emscripten (any host)
   -clang            Windows: clang-cl instead of cl.exe
   -asan             address sanitizer
@@ -71,6 +77,8 @@ type Options = {
   run: boolean;
   noEmbedFonts: boolean;
   runArgs: string[];
+  /** macOS slices: one architecture, both (universal), or the host's own */
+  arch?: MacArch | "universal";
 };
 
 function parseArgs(args: string[]): Options {
@@ -82,6 +90,7 @@ function parseArgs(args: string[]): Options {
   let run = false;
   let noEmbedFonts = false;
   let runArgs: string[] = [];
+  let arch: MacArch | "universal" | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--") {
@@ -94,7 +103,13 @@ function parseArgs(args: string[]): Options {
     } else if (a === "-wasm") plat = "wasm";
     else if (a === "-linux") plat = "linux";
     else if (a === "-mac") plat = "mac";
-    else if (a === "-clang") flags.clang = true;
+    else if (a === "-arch") {
+      const v = args[++i];
+      if (v !== "x86_64" && v !== "arm64" && v !== "universal") {
+        throw new CliError("-arch needs x86_64, arm64 or universal");
+      }
+      arch = v;
+    } else if (a === "-clang") flags.clang = true;
     else if (a === "-asan") flags.asan = true;
     else if (a === "-static") flags.staticRuntime = true;
     else if (a === "-profile") flags.profile = true;
@@ -120,7 +135,7 @@ function parseArgs(args: string[]): Options {
   if (!config) throw new CliError("missing -dbg or -rel");
   flags.debug = config === "dbg";
   if (run && (all || targets.length > 1)) throw new CliError("-run needs exactly one target");
-  return { flags, plat, targets, all, run, noEmbedFonts, runArgs };
+  return { flags, plat, targets, all, run, noEmbedFonts, runArgs, arch };
 }
 
 function printUsage(plat: Platform): void {
@@ -225,6 +240,62 @@ async function serveWasm(page: string): Promise<number> {
   return 0;
 }
 
+type Target = NonNullable<ReturnType<typeof findTarget>>;
+
+// One architecture slice. Objects, libraries, the embedded archive and the
+// link all carry the arch, so each slice has its own out/<plat>/rel-<arch>
+// and rebuilds stay incremental.
+async function buildSlice(
+  flags: BuildFlags,
+  plat: Platform,
+  targets: Target[],
+  opts: Options,
+): Promise<{ exe: string; env: Record<string, string> }> {
+  const tc = findToolchain(root, plat, flags.clang, fail);
+  console.log(`${tc.label} -> out/${outDirName(plat, flags)} (${cpus().length} jobs), ver ${ngVersion(flags.rev!).ver}`);
+  if (flags.clean) cleanOutDir(plat, flags);
+  stageShared(outDir(plat, flags));
+
+  if (targets.some((t) => t.embedded || depsOf(t, fail).some((d) => d.embedded))) {
+    // The .wasm is a download, so it carries no manual: help opens the
+    // website. The web server compresses it, so the archive inside is stored:
+    // no smaller compressed twice, and nothing to decompress at startup.
+    const web = plat === "wasm";
+    // wasm has no room for the font set; it caches downloads in OPFS
+    const embedFonts = !web && !opts.noEmbedFonts;
+    if (!embedFonts) console.log("not embedding built-in fonts");
+    if (!web) await genDocsForBuild();
+    const host = hostPlatform();
+    const packFlags: BuildFlags = { debug: false, asan: false, clang: false, clean: false, verbose: flags.verbose };
+    const packTc = findToolchain(root, host, false, fail);
+    stageShared(outDir(host, packFlags));
+    const packer = await buildTarget(packTc, findTarget("MakeLZSA")!, packFlags, fail);
+    await packEmbedded(packTc, packer, outDir(plat, flags), root, {
+      manual: !web,
+      compress: !web,
+      fonts: embedFonts,
+    });
+  }
+
+  const started = performance.now();
+  let last = "";
+  for (const t of targets) {
+    last = await buildTarget(tc, t, flags, fail);
+  }
+  console.log(`done in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+  return { exe: last, env: tc.env };
+}
+
+// Both slices into one Mach-O. Panics rather than exit so the caller keeps the
+// cleanup it already did; lipo's own message names the offending input.
+function lipo(out: string, inputs: string[]): void {
+  const p = Bun.spawnSync(["lipo", "-create", ...inputs, "-output", out], { stdout: "pipe", stderr: "pipe" });
+  if (p.exitCode !== 0) {
+    fail(`lipo failed:\n${inputs.join("\n")}\n${p.stderr.toString()}`);
+  }
+  console.log(`lipo -> ${relative(root, out)}`);
+}
+
 async function main(): Promise<void> {
   if (process.argv.length === 2) {
     printUsage(hostPlatform());
@@ -265,45 +336,42 @@ async function main(): Promise<void> {
   for (const t of targets) {
     if (t.platforms && !t.platforms.includes(plat)) fail(`target ${t.name} does not support ${plat}`);
   }
-  const tc = findToolchain(root, plat, flags.clang, fail);
-  console.log(`${tc.label} -> out/${outDirName(plat, flags)} (${cpus().length} jobs), ver ${ngVersion(flags.rev).ver}`);
-  if (flags.clean) cleanOutDir(plat, flags);
-  stageShared(outDir(plat, flags));
-
-  if (targets.some((t) => t.embedded || depsOf(t, fail).some((d) => d.embedded))) {
-    // The .wasm is a download, so it carries no manual: help opens the
-    // website. The web server compresses it, so the archive inside is stored:
-    // no smaller compressed twice, and nothing to decompress at startup.
-    const web = plat === "wasm";
-    // wasm has no room for the font set; it caches downloads in OPFS
-    const embedFonts = !web && !opts.noEmbedFonts;
-    if (!embedFonts) console.log("not embedding built-in fonts");
-    if (!web) await genDocsForBuild();
-    const host = hostPlatform();
-    const packFlags: BuildFlags = { debug: false, asan: false, clang: false, clean: false, verbose: flags.verbose };
-    const packTc = findToolchain(root, host, false, fail);
-    stageShared(outDir(host, packFlags));
-    const packer = await buildTarget(packTc, findTarget("MakeLZSA")!, packFlags, fail);
-    await packEmbedded(packTc, packer, outDir(plat, flags), root, {
-      manual: !web,
-      compress: !web,
-      fonts: embedFonts,
-    });
-  }
-
+  if (opts.arch && plat !== "mac") fail("-arch is macOS only");
+  const slices: (MacArch | undefined)[] = opts.arch === "universal" ? ["x86_64", "arm64"] : [opts.arch];
   const started = performance.now();
   let last = "";
-  for (const t of targets) {
-    last = await buildTarget(tc, t, flags, fail);
-    if (plat === "mac" && t.name === defaultTarget) {
-      console.log(`bundle ${relative(root, makeMacBundle(root, last, ngVersion(flags.rev).ver))}`);
-    }
+  let env: Record<string, string> = {};
+  for (const a of slices) {
+    if (slices.length > 1) console.log(`\n=== ${a} ===`);
+    const r = await buildSlice(a ? { ...flags, arch: a } : flags, plat, targets, opts);
+    last = r.exe;
+    env = r.env;
   }
-  console.log(`done in ${((performance.now() - started) / 1000).toFixed(1)} s`);
-  recordBuild(root, ngVersion(flags.rev).ver, `${plat}/${flags.debug ? "dbg" : "rel"}  ${names.join(" ")}`);
+
+  if (plat === "mac" && targets.some((t) => t.name === defaultTarget)) {
+    const exe = exeName(plat, defaultTarget, "app");
+    let built = join(outDir(plat, flags), exe);
+    if (opts.arch === "universal") {
+      // out/mac/rel is the release dir, and what the bundle and the verify
+      // script point at: one fat Mach-O made from the two slices
+      const perArch = (["x86_64", "arm64"] as MacArch[]).map((a) => join(outDir(plat, { ...flags, arch: a }), exe));
+      lipo(built, perArch);
+      last = built;
+    } else if (opts.arch) {
+      built = join(outDir(plat, { ...flags, arch: opts.arch }), exe);
+      last = built;
+    }
+    console.log(`bundle ${relative(root, makeMacBundle(root, built, ngVersion(flags.rev).ver))}`);
+  }
+  console.log(`total ${((performance.now() - started) / 1000).toFixed(1)} s`);
+  recordBuild(
+    root,
+    ngVersion(flags.rev).ver,
+    `${plat}/${flags.debug ? "dbg" : "rel"}  ${names.join(" ")}${opts.arch ? `  (${opts.arch})` : ""}`,
+  );
 
   if (opts.run && targets[0]!.kind !== "staticlib") {
-    process.exit(await runExe(plat, last, opts.runArgs, tc.env));
+    process.exit(await runExe(plat, last, opts.runArgs, env));
   }
 }
 

@@ -106,7 +106,7 @@ export async function packEmbedded(
   return archive;
 }
 
-export async function embedLzsa(tc: Toolchain, archive: string, dir: string): Promise<string> {
+export async function embedLzsa(tc: Toolchain, archive: string, dir: string, arch?: string): Promise<string> {
   const wrapper = join(root, "src/shared/EmbeddedLzsa.S");
   const obj = join(dir, tc.msvcStyle ? "embedded.res" : "embedded.o");
   let args: string[];
@@ -132,6 +132,9 @@ export async function embedLzsa(tc: Toolchain, archive: string, dir: string): Pr
     // ld warns that embedded.o was built for a newer macOS than the link.
     if (tc.plat === "mac") {
       args.push(`-mmacosx-version-min=${MAC_MIN_VERSION}`);
+      // the archive object is linked into the app, so it has to be the same
+      // slice; without -arch it is the host's, and an arm64 link drops it
+      if (arch) args.push("-arch", arch);
     }
   }
   const key = args.join("\n");

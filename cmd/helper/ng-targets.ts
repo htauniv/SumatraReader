@@ -13,8 +13,18 @@ export type TargetKind = "app" | "console" | "staticlib";
 
 // A native build targets the host: `-mac` only runs on a mac, `-linux`
 // natively or inside WSL. Third-party libraries with x86 intrinsics or an
-// architecture-specific config header ask for this.
+// architecture-specific config header ask for this. With `-arch` the build
+// describes a slice instead, so `perArch` wins over the host answer.
 export const hostArm64 = process.arch === "arm64";
+
+/** macOS slices a target can be compiled for. */
+export type Arch = "x86_64" | "arm64";
+
+/** the arch a build actually targets: -arch when given, else the host's */
+export function effectiveArch(arch?: Arch): Arch {
+  if (arch) return arch;
+  return hostArm64 ? "arm64" : "x86_64";
+}
 
 /** NASM-assembled sources. Only used where the platform has an assembler. */
 export type AsmSources = {
@@ -45,6 +55,8 @@ export type GeneratedHeader = {
   content?: string;
   /** platforms that need it; all when absent */
   platforms?: Platform[];
+  /** architectures that need it; all when absent (macOS only) */
+  archs?: Arch[];
 };
 
 export type Target = {
@@ -81,7 +93,14 @@ export type Target = {
   /** third-party libs orig compiles optimized even in debug builds */
   alwaysOptimize?: boolean;
   /** per-source overrides matched by glob; `platforms` limits where they apply */
-  perSource?: { glob: string; flags: string[]; msvcFlags?: string[]; platforms?: Platform[] }[];
+  perSource?: {
+    glob: string;
+    flags: string[];
+    msvcFlags?: string[];
+    platforms?: Platform[];
+    /** x86 SIMD flags exist only on x86, so a slice can opt out */
+    archs?: Arch[];
+  }[];
   asm?: AsmSources;
   /** Windows resource script (icons, version, manifest), compiled with rc.exe */
   rc?: string;
@@ -93,6 +112,8 @@ export type Target = {
   wasmPreload?: { from: string; to: string }[];
   /** sources, excludes, defines and includes added only on these platforms */
   perPlatform?: Partial<Record<Platform, PlatformExtra>>;
+  /** the same for one macOS slice, merged after perPlatform */
+  perArch?: Partial<Record<Arch, PlatformExtra>>;
 };
 
 export type PlatformExtra = {
@@ -103,19 +124,25 @@ export type PlatformExtra = {
 };
 
 /**
- * `t`, with its `perPlatform` entry for `plat` merged in. Platform include
- * dirs go first: they are the ones that shadow a header (dav1d's stdatomic.h
- * shim for cl.exe).
+ * `t`, with its `perPlatform` entry for `plat` and, on macOS, its `perArch`
+ * entry for `arch` merged in. Platform include dirs go first: they are the
+ * ones that shadow a header (dav1d's stdatomic.h shim for cl.exe).
  */
-export function forPlatform(t: Target, plat: Platform): Target {
+export function forPlatform(t: Target, plat: Platform, arch?: Arch): Target {
   const extra = t.perPlatform?.[plat];
-  if (!extra) return t;
+  // an arch-specific entry only means something where the slices differ
+  const archExtra = plat === "mac" ? t.perArch?.[effectiveArch(arch)] : undefined;
+  if (!extra && !archExtra) return t;
+  const sources = [...(extra?.sources ?? []), ...(archExtra?.sources ?? [])];
+  const exclude = [...(extra?.exclude ?? []), ...(archExtra?.exclude ?? [])];
+  const defines = [...(extra?.defines ?? []), ...(archExtra?.defines ?? [])];
+  const includes = [...(archExtra?.includes ?? []), ...(extra?.includes ?? [])];
   return {
     ...t,
-    sources: [...t.sources, ...(extra.sources ?? [])],
-    exclude: [...(t.exclude ?? []), ...(extra.exclude ?? [])],
-    defines: [...(t.defines ?? []), ...(extra.defines ?? [])],
-    includes: [...(extra.includes ?? []), ...(t.includes ?? [])],
+    sources: [...t.sources, ...sources],
+    exclude: [...(t.exclude ?? []), ...exclude],
+    defines: [...(t.defines ?? []), ...defines],
+    includes: [...includes, ...(t.includes ?? [])],
   };
 }
 
@@ -388,8 +415,6 @@ const tessX86Kernels: { glob: string; flags: string[] }[] = [
   { glob: "ext/tesseract/src/arch/intsimdmatrixsse.cpp", flags: ["-msse4.1"] },
 ];
 const tessX86Kernelsx86: PlatformExtra = { defines: tessX86Defines };
-// an arm64 mac has no x86 kernels; NEON is picked up from __ARM_NEON
-const tessMac: PlatformExtra = hostArm64 ? { exclude: tessX86Kernels.map((k) => k.glob) } : tessX86Kernelsx86;
 
 export const ocrTargets: Target[] = [
   {
@@ -452,13 +477,24 @@ export const ocrTargets: Target[] = [
     exceptions: true,
     rtti: true,
     alwaysOptimize: true,
+    // the x86 kernels need their instruction set enabled and the macros
+    // tesseract tests; an arm64 slice has neither and cannot even be handed
+    // -mavx2, so it drops the kernels and picks NEON up from __ARM_NEON
+    perArch: {
+      x86_64: { defines: tessX86Defines },
+      arm64: { exclude: tessX86Kernels.map((k) => k.glob) },
+    },
     perPlatform: {
       // cl.exe does not predefine the instruction-set macros the kernels test
       win: { defines: [...tessX86Defines, "__AVX__", "__AVX2__", "__FMA__", "__SSE4_1__"] },
       linux: tessX86Kernelsx86,
-      mac: tessMac,
     },
-    perSource: tessX86Kernels.map((k) => ({ ...k, platforms: ["linux", "mac"] as Platform[] })),
+    perSource: tessX86Kernels.map((k) => ({
+      ...k,
+      platforms: ["linux", "mac"] as Platform[],
+      // clang rejects -mavx2 outright when targeting arm64
+      archs: ["x86_64"] as Arch[],
+    })),
   },
   {
     // zxing-cpp reads barcodes, zint writes them
@@ -1184,7 +1220,9 @@ export const targets: Target[] = [
       platforms: ["win"],
     },
     generated: [
-      { name: "config.h", content: dav1dConfig(hostArm64), platforms: ["linux", "mac"] },
+      // the arch macros and HAVE_ASM in it decide which paths lib.c compiles
+      { name: "config.h", content: dav1dConfig(false), platforms: ["linux", "mac"], archs: ["x86_64"] },
+      { name: "config.h", content: dav1dConfig(true), platforms: ["linux", "mac"], archs: ["arm64"] },
       { name: "config.h", content: dav1dConfig(false), platforms: ["wasm"] },
     ],
     // off Windows HAVE_ASM (=0) and the arch macros come from the generated
@@ -1197,8 +1235,11 @@ export const targets: Target[] = [
         defines: ["ARCH_X86_32=0", "ARCH_X86_64=1", "HAVE_ASM=1"],
         includes: ["ext/dav1d/include/compat/msvc"],
       },
-      linux: hostArm64 ? { ...dav1dArmCpu, ...dav1dLinux } : dav1dLinux,
-      ...(hostArm64 ? { mac: dav1dArmCpu } : {}),
+      linux: dav1dLinux,
+    },
+    // x86/cpu.c is cpuid, arm/cpu.c is sysctlbyname on mac: one per slice
+    perArch: {
+      arm64: dav1dArmCpu,
     },
   },
   {
@@ -1218,8 +1259,10 @@ export const targets: Target[] = [
     perSource: [
       {
         glob: "ext/heicdec/heic.c",
-        flags: hostArm64 ? [] : ["-msse4.1"],
+        flags: ["-msse4.1"],
         platforms: ["win", "linux", "mac"],
+        // arm64 clang has no -msse4.1; the guard in heic.c is x86-only anyway
+        archs: ["x86_64"],
       },
     ],
   },

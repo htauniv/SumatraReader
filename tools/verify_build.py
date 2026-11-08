@@ -87,7 +87,10 @@ def check(name, ok, detail=""):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--build-log", default="/tmp/sumatra_build13.log")
+    # comma-separated: "x86_64" (Intel build), "arm64", or both for universal
+    ap.add_argument("--archs", default="x86_64")
     a = ap.parse_args()
+    want = sorted(x.strip() for x in a.archs.split(",") if x.strip())
 
     ts_name = read_decl(APP_CONFIG, r'export const APP_NAME = "([^"]+)"')
     cpp_name = read_decl(VERSION_H, r'#define kAppName "([^"]+)"')
@@ -114,12 +117,12 @@ def main():
     check("binary exists", os.path.isfile(EXE), EXE)
     check("app bundle exists", os.path.isdir(APP), APP)
 
-    # architecture
+    # architecture: the slices -arch asked for, one by default
     rc, out = run(["lipo", "-archs", EXE])
     arch = out.strip()
-    check("x86_64 Intel only", rc == 0 and arch == "x86_64", arch)
+    check(f"architecture = {'+'.join(want)}", rc == 0 and sorted(arch.split()) == want, arch)
     rc, out = run(["file", EXE])
-    check("Mach-O 64-bit executable", "Mach-O 64-bit executable x86_64" in out, out.strip()[:110])
+    check("Mach-O 64-bit executable", "Mach-O 64-bit executable" in out, out.strip()[:110])
 
     # deployment target: the decisive compatibility marker
     rc, out = run(["otool", "-l", EXE])
@@ -168,7 +171,8 @@ def main():
     check("ad-hoc signature valid", rc == 0, out.strip()[:120])
     if os.path.isfile(BUNDLE_EXE):
         rc2, out2 = run(["lipo", "-archs", BUNDLE_EXE])
-        check("bundle binary matches x86_64", rc2 == 0 and out2.strip() == "x86_64", out2.strip())
+        check("bundle binary matches the built slices",
+              rc2 == 0 and sorted(out2.split()) == want, out2.strip())
 
     # embedded translations
     if os.path.isfile(TRANSLATIONS):

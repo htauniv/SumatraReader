@@ -20,6 +20,9 @@ import { MAC_MIN_VERSION } from "./ng-mac-config";
 
 export { MAC_MIN_VERSION };
 
+/** macOS slices. An Intel host can cross-compile arm64 (and the reverse). */
+export type MacArch = "x86_64" | "arm64";
+
 export type BuildFlags = {
   debug: boolean;
   asan: boolean;
@@ -32,6 +35,8 @@ export type BuildFlags = {
   rev?: number;
   /** Linux: link libstdc++ and libgcc into the executable */
   staticRuntime?: boolean;
+  /** macOS: compile this slice; unset means the host's own architecture */
+  arch?: MacArch;
 };
 
 export type Fail = (msg: string) => never;
@@ -92,6 +97,9 @@ export function outDirName(plat: Platform, f: BuildFlags): string {
   if (f.clang && plat !== "mac") name += "-clang";
   if (f.asan) name += "-asan";
   if (f.profile) name += "-profile";
+  // objects and libraries are architecture-specific: keep each slice in its
+  // own directory so a second arch doesn't reuse the first arch's objects
+  if (f.arch) name += `-${f.arch}`;
   return `${platDirName(plat)}/${name}`;
 }
 
@@ -165,8 +173,10 @@ function resolveAsmSources(t: Target, plat: Platform, f: BuildFlags, fail: Fail)
 // Writes the target's config headers into out/<cfg>/generated/<target>/ and
 // returns the target with that directory first on the include path. Rewrites
 // only on a change, so an unchanged header does not invalidate the objects.
-function withGenerated(t: Target, plat: Platform, dir: string): Target {
-  const wanted = (t.generated ?? []).filter((g) => !g.platforms || g.platforms.includes(plat));
+function withGenerated(t: Target, plat: Platform, dir: string, arch?: MacArch): Target {
+  const wanted = (t.generated ?? []).filter(
+    (g) => (!g.platforms || g.platforms.includes(plat)) && (!g.archs || g.archs.includes(effArch(arch))),
+  );
   if (wanted.length === 0) return t;
   const genDir = join(dir, "generated", t.name);
   mkdirSync(genDir, { recursive: true });
@@ -360,6 +370,9 @@ function gccCflags(tc: Toolchain, t: Target, f: BuildFlags, cpp: boolean): strin
     // the build instead of silently discarding them.
     flags.push(`-mmacosx-version-min=${MAC_MIN_VERSION}`, "-Wno-error=unguarded-availability");
     flags.push("-Wno-deprecated-declarations", "-g");
+    // no -arch means the host's own architecture; naming it makes the build
+    // reproducible from either Intel or Apple Silicon
+    if (f.arch) flags.push("-arch", f.arch);
   }
   if (tc.plat === "linux") flags.push("-g");
   if (tc.plat === "wasm" && f.debug) flags.push("-g");
@@ -378,10 +391,18 @@ function gccCflags(tc: Toolchain, t: Target, f: BuildFlags, cpp: boolean): strin
   return flags;
 }
 
-function perSourceFlags(t: Target, src: string, tc: Toolchain): string[] {
+// the arch a slice actually targets: -arch when given, else the host's
+function effArch(arch?: MacArch): MacArch {
+  if (arch) return arch;
+  return process.arch === "arm64" ? "arm64" : "x86_64";
+}
+
+function perSourceFlags(t: Target, src: string, tc: Toolchain, arch?: MacArch): string[] {
   const out: string[] = [];
   for (const ps of t.perSource ?? []) {
     if (ps.platforms && !ps.platforms.includes(tc.plat)) continue;
+    // x86 intrinsics flags and arm64 are mutually exclusive
+    if (ps.archs && !ps.archs.includes(effArch(arch))) continue;
     const glob = new Glob(ps.glob);
     const path = sharedPath(src);
     if (!glob.match(src) && !glob.match(path) && !glob.match(path.replace(/^src\//, "src/ng/"))) continue;
@@ -551,7 +572,7 @@ function asmCmd(t: Target, src: string, obj: string): string[] {
 
 function compileCmd(tc: Toolchain, t: Target, f: BuildFlags, src: string, obj: string): string[] {
   const cpp = !isCSource(src);
-  const extra = perSourceFlags(t, src, tc);
+  const extra = perSourceFlags(t, src, tc, f.arch);
   if (tc.msvcStyle) {
     const flags = msvcCflags(t, f, cpp);
     const lang = cpp ? "/TP" : "/TC";
@@ -581,7 +602,7 @@ async function runPool<T>(jobs: T[], n: number, fn: (job: T) => Promise<boolean>
 }
 
 async function compileTarget(tc: Toolchain, t0: Target, f: BuildFlags, dir: string, fail: Fail): Promise<string[]> {
-  const t = withGenerated(withShared(forPlatform(t0, tc.plat), dir), tc.plat, dir);
+  const t = withGenerated(withShared(forPlatform(t0, tc.plat, f.arch), dir), tc.plat, dir, f.arch);
   const sources = resolveSources(t, tc.plat, fail);
   const asmSources = resolveAsmSources(t, tc.plat, f, fail);
   const objs: string[] = [];
@@ -933,6 +954,7 @@ function linkCmd(
       // this the driver takes the host SDK's version (26.0) even when every
       // object was compiled for 13.0
       ld.push(`-mmacosx-version-min=${MAC_MIN_VERSION}`);
+      if (f.arch) ld.push("-arch", f.arch);
       if (t.systemDeps === "archive") {
         ld.push("-liconv");
       } else {
@@ -990,7 +1012,7 @@ export async function buildTarget(tc: Toolchain, t: Target, f: BuildFlags, fail:
   const objs = await compileTarget(tc, t, f, dir, fail);
   if (t.kind === "staticlib") return archive(tc, t, dir, objs, fail);
   if (t.embedded || depsOf(t, fail).some((d) => d.embedded)) {
-    objs.push(await embedLzsa(tc, join(dir, "embedded.lzsa"), dir));
+    objs.push(await embedLzsa(tc, join(dir, "embedded.lzsa"), dir, f.arch));
   }
   if (t.rc && tc.plat === "win") objs.push(await compileRc(tc, t, f, dir, fail));
   return link(tc, t, f, dir, objs, libs, fail);
