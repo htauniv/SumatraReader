@@ -255,44 +255,82 @@ bool IsCurrLangRtl() {
 }
 
 #if !OS_WIN
-// ng: the win32 half below maps a LANGID to our language code. POSIX has no
-// LANGID; $LC_ALL / $LANG ("de_DE.UTF-8") name the language directly.
+// apptranslator codes that differ from the BCP 47 tag the OS reports; most
+// languages match their tag already ("de", "fr"). Within a language the
+// longest tag comes first, so odd entries are tags and even ones our codes.
+//
+// Deliberate deviation from upstream: upstream sends zh-Hant / zh-TW / zh-HK
+// to "tw", but this build ships only en + cn, so Traditional Chinese locales
+// resolve to cn (Simplified UI) rather than falling back to English. Change
+// those four mappings to "tw" once a Traditional translation is bundled.
+static const char* gLocaleAliases =
+    "zh-hans\0cn\0zh-cn\0cn\0zh-sg\0cn\0zh\0cn\0"
+    "zh-hant\0cn\0zh-tw\0cn\0zh-hk\0cn\0zh-mo\0cn\0"
+    "ko\0kr\0cs\0cz\0da\0dk\0pt-br\0br\0be\0by\0vi\0vn\0ms\0my\0hy\0am\0nb\0no\0"
+    "sr-cyrl\0sr-rs\0sr-latn\0sp-rs\0sr\0sr-rs\0ca-valencia\0ca-xv\0fy\0fy-nl\0";
+
+static int FindLangIdxByTag(Str tag) {
+    int i = SeqStrIndex(gLocaleAliases, tag);
+    if (i >= 0 && i % 2 == 0) {
+        return FindLangIdx(SeqStrByIndex(gLocaleAliases, i + 1));
+    }
+    return FindLangIdx(tag);
+}
+
+// "zh-Hans-CN", "de_DE.UTF-8" or "pt_BR" to our language code; empty when we
+// have no translation for it. The tag loses its last subtag until one matches,
+// so "zh-Hant-TW" tries "zh-hant-tw", then "zh-hant", then "zh".
+Str LangCodeFromLocale(Str locale) {
+    if (locale.len == 0) {
+        return {};
+    }
+    int n = 0;
+    while (n < locale.len && locale.s[n] != '.' && locale.s[n] != '@') {
+        n++;
+    }
+    TempStr tag = str::DupTemp(Str(locale.s, n));
+    str::ToLowerInPlace(tag);
+    for (int i = 0; i < len(tag); i++) {
+        if (tag.s[i] == '_') {
+            tag.s[i] = '-';
+        }
+    }
+    while (len(tag) > 0) {
+        int idx = FindLangIdxByTag(tag);
+        if (idx >= 0) {
+            return GetLangCodeByIdxTemp(idx);
+        }
+        int dash = str::LastIndexOfChar(tag, '-');
+        if (dash <= 0) {
+            break;
+        }
+        tag = Str(tag.s, dash);
+    }
+    return {};
+}
+
+// ng: the win32 half below maps a LANGID to our language code. Here the OS's
+// preferred languages name the language, and $LC_ALL / $LC_MESSAGES / $LANG
+// (a portable install, or a language forced from the shell) override it.
+// The first entry we have a translation for wins.
 Str DetectUserLang() {
+    StrVec locales;
+    GetSystemPreferredLocales(locales);
+    for (Str s : locales) {
+        Str code = LangCodeFromLocale(s);
+        if (len(code) > 0) {
+            return code;
+        }
+    }
     const char* envNames[] = {"LC_ALL", "LC_MESSAGES", "LANG"};
     for (const char* name : envNames) {
         const char* v = getenv(name);
         if (!v || !*v) {
             continue;
         }
-        Str s = Str((char*)v);
-        // "de_DE.UTF-8" -> try "de-de", then "de"
-        int n = 0;
-        while (n < s.len && s.s[n] != '.' && s.s[n] != '@') {
-            n++;
-        }
-        TempStr code = str::DupTemp(Str(s.s, n));
-        str::ToLowerInPlace(code);
-        for (int i = 0; i < len(code); i++) {
-            if (code.s[i] == '_') {
-                code.s[i] = '-';
-            }
-        }
-        // SumatraPDF names Simplified Chinese "cn", not ISO "zh". A Chinese
-        // locale is "zh_CN" / "zh-Hans-CN" / "zh-TW"; this build ships only
-        // en + cn, so every zh* locale resolves to the Chinese translation
-        // instead of silently falling back to English on first launch.
-        if (len(code) >= 2 && code.s[0] == 'z' && code.s[1] == 'h') {
-            code = str::DupTemp(StrL("cn"));
-        }
-        int idx = FindLangIdx(code);
-        if (idx < 0) {
-            int dash = str::IndexOfChar(code, '-');
-            if (dash > 0) {
-                idx = FindLangIdx(Str(code.s, dash));
-            }
-        }
-        if (idx >= 0) {
-            return GetLangCodeByIdxTemp(idx);
+        Str code = LangCodeFromLocale(Str((char*)v));
+        if (len(code) > 0) {
+            return code;
         }
     }
     return StrL("en");

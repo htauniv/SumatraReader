@@ -806,6 +806,7 @@ const macFrameworks = [
   "AudioToolbox",
   "AVFoundation",
   "Cocoa",
+  "CoreFoundation",
   "CoreText",
   "CoreGraphics",
   "ImageIO",

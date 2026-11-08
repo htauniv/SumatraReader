@@ -1700,6 +1700,9 @@ export const targets: Target[] = [
     // orig's desktop screenshot picker. Win32 only; other platforms keep the
     // page render in src/ng/Screenshot.cpp.
     perPlatform: {
+      // the OS language preferences come from System Settings on macOS; there
+      // is no readable global for them on the other platforms
+      mac: { sources: ["src/ng/SystemLocale_mac.mm"] },
       win: {
         sources: ["src/ScreenshotCapture.cpp", "src/ng/ocr/Ocr_nonmac.cpp"],
         includes: ["ext/webview2"],

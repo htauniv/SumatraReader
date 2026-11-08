@@ -24,10 +24,11 @@ clang++ "-mmacosx-version-min=$MIN_VER" -o "$TEST_BIN" "${TEST_BIN}.o" \
     "$OBJ/Translations.cpp.o" \
     "$OBJ/TranslationLangs.cpp.o" \
     "$OBJ/EmbeddedResources.cpp.o" \
+    "$OUT/obj/SumatraReader/src/ng/SystemLocale_mac.mm.o" \
     "$OUT/embedded.o" \
     "$OUT/lib/libbase.a" \
     "$OUT/lib/liblzma.a" \
-    -framework Cocoa -framework Foundation -framework Security \
+    -framework Cocoa -framework CoreFoundation -framework Foundation -framework Security \
     -lcurl -liconv
 
 exec "$TEST_BIN" "$@"

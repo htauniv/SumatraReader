@@ -56,6 +56,42 @@ static bool embeddedHas(const char* name, int minSize) {
     return ok;
 }
 
+static bool strIs(Str s, const char* want) {
+    int n = (int)strlen(want);
+    if (s.len != n) return false;
+    return n == 0 || memcmp(s.s, want, n) == 0;
+}
+
+// The OS reports BCP 47 tags, apptranslator codes differ for a dozen
+// languages. A Finder-launched app has no $LANG, so this mapping is what makes
+// a Chinese Mac start in Chinese.
+static bool localeCases() {
+    struct Case {
+        const char* in;
+        const char* want;
+    };
+    // zh-Hant -> cn is this build's deviation: it ships en + cn only, so a
+    // Traditional locale gets the Simplified UI instead of English
+    const Case cases[] = {
+        {"zh-Hans-CN", "cn"}, {"zh-Hans", "cn"}, {"zh_CN.UTF-8", "cn"}, {"zh-CN", "cn"},
+        {"zh-Hant-TW", "cn"}, {"zh-TW", "cn"},  {"zh_HK", "cn"},      {"zh", "cn"},
+        {"en-US", "en"},      {"en_GB.UTF-8", "en"}, {"en", "en"},
+        // no translation shipped: must report "unknown", not a wrong code
+        {"fr-FR", ""},        {"de-DE", ""},   {"ja-JP", ""},
+        // neither is a language
+        {"C", ""},            {"POSIX", ""},   {"", ""},
+    };
+    bool ok = true;
+    for (const Case& c : cases) {
+        Str got = trans::LangCodeFromLocale(Str((char*)c.in));
+        bool same = strIs(got, c.want);
+        printf("  %-14s -> %-4.*s %s\n", c.in[0] ? c.in : "(empty)", got.len, got.s ? got.s : "",
+               same ? "OK" : "WRONG");
+        if (!same) ok = false;
+    }
+    return ok;
+}
+
 int main() {
     printf("=== language table (%d entries) ===\n", trans::GetLangsCount());
     for (int i = 0; i < trans::GetLangsCount(); i++) {
@@ -98,9 +134,11 @@ int main() {
         show("en", k);
     }
 
+    printf("=== locale -> language code ===\n");
+    bool localeOk = localeCases();
+
     printf("=== embedded resources ===\n");
-    bool manual = true;
-    manual &= embeddedHas("manual.shell.html", 1000);
+    bool manual = true;    manual &= embeddedHas("manual.shell.html", 1000);
     manual &= embeddedHas("manifest.json", 50);
     manual &= embeddedHas("all-docs.json", 20);
     manual &= embeddedHas("SumatraPDF-documentation.md", 200);
@@ -111,9 +149,10 @@ int main() {
 
     printf("=== verdict ===\n");
     bool ok = trans::GetLangsCount() == 2 && nCn > 0 &&
-              nEn == (int)(sizeof(keys) / sizeof(keys[0])) && manual;
+              nEn == (int)(sizeof(keys) / sizeof(keys[0])) && manual && localeOk;
     printf("  cn strings with CJK bytes: %d/%zu\n", nCn, sizeof(keys) / sizeof(keys[0]));
     printf("  en strings restored:       %d/%zu\n", nEn, sizeof(keys) / sizeof(keys[0]));
+    printf("  locale mapping:            %s\n", localeOk ? "OK" : "FAIL");
     printf("  offline manual resources:  %s\n", manual ? "OK" : "FAIL");
     printf("  RESULT: %s\n", ok ? "TRANSLATION_RUNTIME_OK" : "TRANSLATION_RUNTIME_FAIL");
     trans::Destroy();

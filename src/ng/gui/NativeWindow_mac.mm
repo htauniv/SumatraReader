@@ -28,19 +28,10 @@ void AppShellDisableAutoTermination() {
     info.automaticTerminationSupportEnabled = NO;
     [info disableAutomaticTermination:@"SumatraReader"];
 
-    // Finder-launched apps have no LC_ALL / LANG in their environment, so
-    // trans::DetectUserLang() would always report English on a Chinese mac.
-    // Publish the system's preferred BCP-47 language as a POSIX locale before
-    // LoadSettings() runs: "zh-Hans-CN" -> "zh_Hans_CN.UTF-8", which the
-    // zh* -> cn mapping in Translations.cpp resolves to Simplified Chinese.
-    // Never override an explicit locale the user set for the process.
-    if (!getenv("LANG") && !getenv("LC_ALL")) {
-        NSString* pref = [[NSLocale preferredLanguages] firstObject];
-        if (pref.length > 0) {
-            NSString* loc = [pref stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
-            setenv("LANG", [[loc stringByAppendingString:@".UTF-8"] UTF8String], 0);
-        }
-    }
+    // The UI language no longer needs a LANG faked from NSLocale here:
+    // trans::DetectUserLang() reads System Settings directly through
+    // trans::GetSystemPreferredLocales() (src/ng/SystemLocale_mac.mm), which
+    // also works for an app started from Finder with an empty environment.
 
     // SumatraPDF has its own tabs (Tabs.cpp). macOS's automatic window tabbing
     // would wrap those in a second, system-level tab bar and steal Cmd+` etc.

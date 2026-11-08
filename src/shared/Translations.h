@@ -17,6 +17,17 @@ bool IsCurrLangRtl();
 Str DetectUserLang();
 void Destroy();
 
+#if !OS_WIN
+// The OS's language preferences as BCP 47 tags, most preferred first. macOS
+// reads System Settings (a Finder-launched app has no LC_ALL / LANG); builds
+// without an implementation return nothing and DetectUserLang() then falls back
+// to the environment.
+void GetSystemPreferredLocales(StrVec& out);
+// "zh-Hans-CN", "de_DE.UTF-8" or "pt_BR" to our language code; empty when we
+// have no translation for it. Trailing subtags are dropped until one matches.
+Str LangCodeFromLocale(Str locale);
+#endif
+
 } // namespace trans
 
 Str Tr(Str s);
