@@ -6,6 +6,15 @@
 
 [English version](README.md) · [上游仓库](https://github.com/sumatrapdfreader/sumatrapdf) · [构建说明](README-mac.md) · 许可：GPLv3
 
+## 下载
+
+| 渠道 | 地址 | 说明 |
+| --- | --- | --- |
+| GitHub Releases | <https://github.com/htauniv/SumatraReader/releases> | 正式发布页，安装包与各版本源码 |
+| 国内镜像（蓝奏云） | <https://wwbbk.lanzoum.com/i5Q1q4fa0z6b> | 访问密码 `61af`，国内网络免开代理 |
+
+下载后解压得到 `SumatraReader.app`，拖进「应用程序」文件夹即可。本构建只做了 ad-hoc 签名（没有 Apple 开发者证书），首次打开时系统会提示"无法验证开发者"：在 Finder 里右键 → 打开，或到「系统设置 → 隐私与安全性」点「仍要打开」放行，之后不再询问。若文档缺内嵌中文字体，首次阅读会联网下载一次思源宋体（`SourceHanSerif`），此时系统还会单独询问一次网络访问权限，这是 macOS 对未公证应用的常规限制。
+
 ## 为什么叫 Reader，而不是 PDF
 
 上游的名字其实低估了这个程序：SumatraPDF 早已是通用电子书 / 文档阅读器，PDF 只是众多格式之一。这个 fork 保留了这种广度，改名为 **SumatraReader**，是让名字与实际能力一致，而不是让人误以为它只能看 PDF。

@@ -6,6 +6,15 @@
 
 [简体中文说明](README.zh-CN.md) · [Upstream](https://github.com/sumatrapdfreader/sumatrapdf) · [Build notes](README-mac.md) · License: GPLv3
 
+## Download
+
+| Channel | URL | Notes |
+| --- | --- | --- |
+| GitHub Releases | <https://github.com/htauniv/SumatraReader/releases> | Official release page: installers and sources per version |
+| China mirror (Lanzou Cloud) | <https://wwbbk.lanzoum.com/i5Q1q4fa0z6b> | Access code `61af`; no proxy needed from mainland China |
+
+Unzip to get `SumatraReader.app` and drag it into Applications. The build is ad-hoc signed rather than signed with an Apple Developer ID, so the first launch is refused with "cannot verify the developer": right-click → Open in Finder, or allow it under System Settings → Privacy & Security → "Open Anyway". This is a one-time check. If a document lacks embedded CJK fonts, the first open also downloads Source Han Serif (`SourceHanSerif`) once and macOS asks separately for network permission — the usual restriction on a non-notarized app.
+
 ## Why "Reader", not "PDF"
 
 The upstream name undersells the program. SumatraPDF has long been a general-purpose ebook and document reader: PDF is one format among many. This fork keeps that breadth, so the rename to **SumatraReader** makes the name match what the app actually does instead of implying a single-format PDF viewer.
