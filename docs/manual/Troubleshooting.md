@@ -24,9 +24,18 @@ back to English. That is fixed in this build. Quit the old process before launch
 
 ## 系统语言是中文但首次启动仍是英文 / First launch stayed English
 
-Finder 启动的程序没有 `LANG` / `LC_ALL` 环境变量，上游语言探测会误判为英文。
-本构建在启动早期读取 `NSLocale.preferredLanguages` 并补上 locale，`zh-Hans-CN` 等会映射到 `cn`。
-若你给进程显式设置过 `LANG` / `LC_ALL`，程序会尊重你的设置而不覆盖。
+Finder 启动的程序没有 `LANG` / `LC_ALL` 环境变量，只读环境变量的探测必然读到空值。
+本构建的判定顺序是：先 `CFLocaleCopyPreferredLanguages()`（系统偏好语言），
+无结果才看 `LC_ALL` → `LC_MESSAGES` → `LANG`，最后才回退 `en`。
+每个值都会做别名映射与逐段裁剪，`zh-Hans-CN` → `cn`、`en_GB.UTF-8` → `en`；
+`fr-FR`、`C`、`POSIX` 这类没有对应语言表的输入按「没有意见」处理，不会被猜成中文。
+注意判定是**系统偏好优先、环境变量兜底**：在中文系统上即使 `LANG=en_US.UTF-8`，
+首次启动仍会是中文。想用英文，请在 `Settings → Change Language` 里明确选一次
+（选择结果写进设置文件，之后以设置为准）。
+
+The system preferred languages win over the environment, so exporting `LANG=en_US.UTF-8` on a
+Chinese system will still start in Chinese. Pick the language once in
+`Settings → Change Language` instead; the choice is persisted in the settings file.
 
 ## 中文显示为方块 / Chinese text shows as boxes
 

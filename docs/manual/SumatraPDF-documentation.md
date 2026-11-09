@@ -1,11 +1,11 @@
 # SumatraReader 使用手册 / User Manual
 
-这是为 **macOS Intel 版本地构建** 编写的内置简明手册，可完全离线阅读（按 `F1` 或 `⌘F1` 打开/关闭）。
-This is the built-in, offline manual written for this **local macOS Intel build**.
+这是为 **macOS 本地构建** 编写的内置简明手册，可完全离线阅读（按 `F1` 或 `⌘F1` 打开/关闭）。
+This is the built-in, offline manual written for this **local macOS build**.
 
-- 适用系统 / Supported systems: macOS 13 (Ventura) ~ macOS 26 (Tahoe), Intel x86_64 only
+- 适用系统 / Supported systems: macOS 13 (Ventura) ~ macOS 26 (Tahoe)
+- 架构 / Architecture: universal binary — x86_64 + arm64 in one `.app`, ad-hoc signed, not notarized
 - 界面语言 / UI languages: English + 简体中文 (Simplified Chinese)
-- 架构 / Architecture: single-arch x86_64, ad-hoc signed, not notarized
 
 上游完整在线文档（英文）：`https://www.sumatrapdfreader.org/docs/SumatraPDF-documentation`
 

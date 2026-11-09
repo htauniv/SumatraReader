@@ -1,6 +1,6 @@
 # SumatraReader
 
-**A small, offline-first ebook and document reader for Intel Macs — PDF is only one of the formats it opens, and the Chinese UI actually works.**
+**A small, offline-first ebook and document reader for macOS — PDF is only one of the formats it opens, the Chinese UI actually works, and Intel and Apple Silicon share one binary.**
 
 **Modified from [SumatraPDF](https://github.com/sumatrapdfreader/sumatrapdf)** — specifically the in-progress cross-platform `src/ng/` rewrite. This is an unofficial community fork, not affiliated with or endorsed by the SumatraPDF authors.
 
@@ -27,12 +27,15 @@ Upstream source filenames such as `SumatraPDF.cpp` keep their old names so the t
 
 ## Why this fork exists
 
-SumatraPDF is a Windows application. The `src/ng/` rewrite is intended to be cross-platform, but no macOS build is published. A clean `ng` build on macOS also exposes two problems that make the Chinese UI look broken:
+SumatraPDF is a Windows application. The `src/ng/` rewrite is intended to be cross-platform, but no macOS build is published. A clean `ng` build on macOS also exposes three problems that make the Chinese UI look broken:
 
 1. `cmd/trans-dl.ts` requires `TRANS_UPLOAD_SECRET`. Without it the generated `.work/translations.txt` is empty, is embedded anyway, and `Translations.cpp` silently falls back to English — switching the UI to 中文 does nothing, with no warning at build or run time.
 2. `DetectUserLang()` on non-Windows passes `zh_CN` / `zh-Hans-CN` into a language table where Simplified Chinese is named `cn`, so a Chinese macOS starts in English.
+3. Even with the right code, a process launched from Finder or the Dock has no `$LANG` at all (launchd does not inherit a login shell's environment), so an environment-only check always reads nothing.
 
-SumatraReader fixes both and keeps the scope deliberately narrow: macOS 13–26 on Intel, English + 简体中文, plus a few reader features that matter for Chinese books. The upstream bug has been [reported](https://github.com/sumatrapdfreader/sumatrapdf/issues) so a default build can behave correctly too.
+SumatraReader fixes all three. Issues 2 and 3 were [reported upstream](https://github.com/sumatrapdfreader/sumatrapdf/issues/6513) and fixed by the maintainer in `3c9b393` (the issue is closed); issue 1 is still open upstream — a missing secret still yields a silently empty translation table. This fork instead ships its own translation data and has `verify_build.py` assert that the table is non-empty and has the expected key count, so an empty one cannot pass the build.
+
+The scope stays deliberately narrow: macOS 13–26, one universal binary for Intel and Apple Silicon, English + 简体中文, plus a few reader features that matter for Chinese books.
 
 ## What changed
 
@@ -40,6 +43,8 @@ SumatraReader fixes both and keeps the scope deliberately narrow: macOS 13–26 
 | --- | --- |
 | Product identity | Renamed to **SumatraReader** everywhere a user can see it: the `.app`, macOS app menu, window titles, About box, settings file, app data folder and PDF `CreatorApp` metadata. Kept "based on SumatraPDF" attribution in the UI and docs. |
 | Chinese UI | Rebuilds `translations.txt` (1,208 en→cn pairs) from the public apptranslator history, maps `zh*` locales to `cn`, ships only `SUMATRA_LANGS=en,cn`, and guards new strings with a runtime translation test. Renamed UI strings reuse upstream translations automatically. |
+| Language on first launch | Reads `CFLocaleCopyPreferredLanguages()` first, then falls back to `LC_ALL` / `LC_MESSAGES` / `LANG`, and only then to `en`. Each locale goes through an alias table and trailing-part stripping: `zh-Hans-CN` → `cn`, `en_GB.UTF-8` → `en`, while `fr-FR` / `C` / `POSIX` count as "no opinion" rather than being guessed as English. |
+| Two CPUs, one bundle | `-arch universal` builds x86_64 and arm64 slices separately and `lipo`s them into a single `.app`. tesseract's x86 SIMD kernels and dav1d's CPU detection are dispatched per architecture rather than assumed from the host. |
 | macOS target | Deployment target `13.0` (`minos 13.0`) for the binary and embedded data, ad-hoc code signature, and Finder document-type registration including OFD. |
 | OCR | Document ▸ OCR current page. On-device Apple Vision, Chinese + English, result copied to the clipboard. |
 | AI table of contents | Generates bookmarks for PDFs that have none; reads `ai-toc.json` (`baseUrl` / `apiKey` / `model`) from the app data dir. Requires an LLM API key. |
@@ -60,27 +65,28 @@ Upstream names are deliberately preserved where they are not user-facing: copyri
 
 ## Status
 
-Automated verification passes: all static checks in `tools/verify_build.py` (architecture, `minos 13.0`, bundle identity, signature, translations, embedded manual), the translation runtime test, Chinese strings for all newly added menu items, real books opened without crashes, and an end-to-end Vision OCR test that recognised 37 lines of Chinese on a real page.
+Automated verification passes: all 37 static checks in `tools/verify_build.py` (both architectures, `minos 13.0`, bundle identity, signature, 1,208 translation keys, 41 embedded manual entries plus byte-identical staging against `docs/manual/`), the translation runtime test (17 locale cases), Chinese strings for all newly added menu items, real books opened without crashes, and an end-to-end Vision OCR test that recognised 37 lines of Chinese on a real page.
 
-Still needs human verification: GUI menu clicks end to end, AI table of contents with a real API key, and dictionary lookup with a real StarDict dictionary.
+Still needs human verification: GUI menu clicks end to end, AI table of contents with a real API key, dictionary lookup with a real StarDict dictionary, and the arm64 slice running on real Apple Silicon — this machine is Intel, so arm64 is verified only as far as `lipo -archs`, matching `minos` on both slices, and the full static check suite.
 
-Not supported yet: Apple Silicon (arm64), macOS 27, languages other than en/cn, Windows. These are candidates for later work, not promises.
+Not supported yet: macOS 27, languages other than en/cn, Windows. These are candidates for later work, not promises.
 
 ## Build from source
 
 Requirements: macOS, Xcode Command Line Tools, [bun](https://bun.sh).
 
 ```sh
-SUMATRA_LANGS=en,cn bun cmd/ng-build.ts -mac -rel    # out/mac/rel/SumatraReader.app
+SUMATRA_LANGS=en,cn bun cmd/ng-build.ts -mac -rel    # universal (default) → out/mac/rel/SumatraReader.app
+bun cmd/ng-build.ts -mac -rel -arch arm64            # Apple Silicon slice only
 bun cmd/ng-build.ts -mac -rel -clean                 # full rebuild
 ```
 
-The build invokes clang++ directly (no generated Xcode project). Vendored dependencies in `ext/` are compiled on the first run and reused afterwards. Build identifiers and the history of local builds are managed automatically; see `README-mac.md`.
+The build invokes clang++ directly (no generated Xcode project). Vendored dependencies in `ext/` are compiled on the first run and reused per architecture afterwards. Build identifiers and the history of local builds are managed automatically; see `README-mac.md`.
 
 Checks:
 
 ```sh
-python3 tools/verify_build.py
+python3 tools/verify_build.py --archs x86_64,arm64
 bash tools/trans_runtime_test.sh
 bash tools/ocr_endtoend_test.sh path/to/book.pdf
 ```

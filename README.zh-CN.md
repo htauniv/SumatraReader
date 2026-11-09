@@ -1,6 +1,6 @@
 # SumatraReader
 
-**为 Intel Mac 做的轻量、离线优先电子书 / 文档阅读器 —— PDF 只是它支持的格式之一，中文界面真的能用。**
+**为 macOS 做的轻量、离线优先电子书 / 文档阅读器 —— PDF 只是它支持的格式之一，中文界面真的能用。Intel 与 Apple Silicon 同一个包。**
 
 **Modified from [SumatraPDF](https://github.com/sumatrapdfreader/sumatrapdf)** —— 基于其尚未正式发布的跨平台重写版 `src/ng/`。这是社区非官方 fork，与上游作者无隶属关系，也不代表官方版本。
 
@@ -31,8 +31,11 @@ SumatraPDF 是 Windows 平台阅读器；`src/ng/` 重写版虽然面向跨平�
 
 1. `cmd/trans-dl.ts` 依赖 `TRANS_UPLOAD_SECRET`。缺密钥时生成的 `.work/translations.txt` 是空文件，却照样被打包进 `embedded.lzsa`；运行时 `Translations.cpp` 静默回退英文，于是切换「中文」毫无反应，构建和运行都没有任何提示。
 2. 非 Windows 的 `DetectUserLang()` 把 `zh_CN` / `zh-Hans-CN` 直接拿去查语言表，而 SumatraPDF 内部把简体中文叫 `cn`，匹配失败，中文系统首次启动仍是英文。
+3. 即使语言码映射对了，从 Finder / Dock 启动的进程也拿不到 `$LANG`（launchd 不继承登录 shell 的环境），只看环境变量等于永远读到空值。
 
-SumatraReader 把这两处修好，并把范围收得很窄：macOS 13–26 的 Intel 平台、只保留中英双语，再加几项对中文电子书真正有用的功能。这个问题也已[反馈给上游](https://github.com/sumatrapdfreader/sumatrapdf/issues)，希望默认构建就能正常。
+SumatraReader 把这三处修好。第 2、3 条已[反馈给上游](https://github.com/sumatrapdfreader/sumatrapdf/issues/6513)并由维护者以 `3c9b393` 修复（issue 已关闭）；第 1 条上游仍未处理——缺密钥时依然静默产出空翻译表，本 fork 的做法是自带翻译数据并让 `verify_build.py` 直接断言翻译表非空、键数正确，空表过不了构建检查。
+
+范围收得很窄：macOS 13–26、Intel 与 Apple Silicon 统一二进制、只保留中英双语，再加几项对中文电子书真正有用的功能。
 
 ## 改了什么
 
@@ -40,6 +43,8 @@ SumatraReader 把这两处修好，并把范围收得很窄：macOS 13–26 的 
 | --- | --- |
 | 产品名统一 | 改名为 **SumatraReader**，覆盖用户能看到的所有位置：`.app`、macOS 应用菜单、窗口标题、关于框、设置文件、应用数据目录、导出 PDF 的 `CreatorApp` 元数据；界面与文档中保留「基于 SumatraPDF」的致谢。 |
 | 中文界面 | 用 apptranslator 公开历史接口重建 `translations.txt`（1208 组中英对照），把 `zh*` 语言环境映射到 `cn`，构建时 `SUMATRA_LANGS=en,cn`，并用运行时测试守住新增词条。改名后的词条自动复用上游中文翻译。 |
+| 首次启动语言 | 先读 `CFLocaleCopyPreferredLanguages()`，再退回 `LC_ALL` / `LC_MESSAGES` / `LANG`，最后才是 `en`；每条 locale 都做别名表映射与逐段裁剪，`zh-Hans-CN` → `cn`，`en_GB.UTF-8` → `en`，`fr-FR` / `C` / `POSIX` 按"没有意见"处理。 |
+| 两种 CPU 一个包 | `-arch universal` 分别编译 x86_64 与 arm64 切片再用 `lipo` 合并，两类 Mac 用同一个 `.app`；tesseract 的 x86 SIMD kernel、dav1d 的 CPU 探测按架构分派。 |
 | macOS 部署目标 | 主程序与内嵌数据统一 `minos 13.0`（macOS 13 / 14 / 15 / 26），ad-hoc 签名，Info.plist 注册文档类型（含 OFD）。 |
 | OCR 识别当前页 | Document 菜单，调用 Apple Vision 在设备本地识别中英混排，结果复制到剪贴板。 |
 | AI 目录 | 为没有目录的 PDF 生成书签；从应用数据目录读取 `ai-toc.json`（`baseUrl` / `apiKey` / `model`），需要自备 LLM API key。 |
@@ -60,27 +65,28 @@ SumatraReader 把这两处修好，并把范围收得很窄：macOS 13–26 的 
 
 ## 当前状态
 
-自动验证已通过：`tools/verify_build.py` 的全部静态检查（架构、`minos 13.0`、bundle 身份、签名、翻译、内置手册）、翻译子系统运行时测试、新增菜单词条的中文化、真书打开无崩溃，以及 Vision OCR 端到端测试（真实书页识别出 37 行中文）。
+自动验证已通过：`tools/verify_build.py` 的全部 37 项静态检查（双架构、`minos 13.0`、bundle 身份、签名、翻译表 1208 键、内置手册 41 个归档条目及其与 `docs/manual/` 的逐字节一致）、翻译子系统运行时测试（17 个 locale 用例）、新增菜单词条的中文化、真书打开无崩溃，以及 Vision OCR 端到端测试（真实书页识别出 37 行中文）。
 
-仍需人工验证：GUI 菜单点击全流程、AI 目录（需真实 API key）、词典查询（需真实 StarDict 词典文件）。
+仍需人工验证：GUI 菜单点击全流程、AI 目录（需真实 API key）、词典查询（需真实 StarDict 词典文件）、arm64 切片在 Apple Silicon 实机上的运行（本机为 Intel，只验证到 `lipo` 架构正确、两切片 `minos` 一致、静态检查全过）。
 
-暂不支持：Apple Silicon（arm64）、macOS 27、中英以外的语言、Windows。这些是后续候选方向，不是承诺。
+暂不支持：macOS 27、中英以外的语言、Windows。这些是后续候选方向，不是承诺。
 
 ## 从源码构建
 
 要求：macOS + Xcode Command Line Tools + [bun](https://bun.sh)。
 
 ```sh
-SUMATRA_LANGS=en,cn bun cmd/ng-build.ts -mac -rel   # 产物 out/mac/rel/SumatraReader.app
+SUMATRA_LANGS=en,cn bun cmd/ng-build.ts -mac -rel   # universal（默认），产物 out/mac/rel/SumatraReader.app
+bun cmd/ng-build.ts -mac -rel -arch arm64           # 只出 Apple Silicon 切片
 bun cmd/ng-build.ts -mac -rel -clean                # 全量重建
 ```
 
-构建直接调用 clang++，不生成 Xcode 工程；`ext/` 里的第三方依赖首次全量编译，之后增量复用。构建标识与本地构建历史由构建脚本自动管理，规则见 `README-mac.md`。
+构建直接调用 clang++，不生成 Xcode 工程；`ext/` 里的第三方依赖首次全量编译，之后按切片增量复用。构建标识与本地构建历史由构建脚本自动管理，规则见 `README-mac.md`。
 
 验证：
 
 ```sh
-python3 tools/verify_build.py
+python3 tools/verify_build.py --archs x86_64,arm64
 bash tools/trans_runtime_test.sh
 bash tools/ocr_endtoend_test.sh 某本书.pdf
 ```
