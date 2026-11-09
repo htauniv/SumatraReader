@@ -358,7 +358,12 @@ async function main(): Promise<void> {
       lipo(built, perArch);
       last = built;
     } else if (opts.arch) {
-      built = join(outDir(plat, { ...flags, arch: opts.arch }), exe);
+      // One release dir, whichever way the build ran: the bundle, the archive
+      // and the verify script all live in out/mac/rel. A single-slice build
+      // would otherwise leave its .app next to the slice objects, where
+      // nothing looks for it.
+      const sliceExe = join(outDir(plat, { ...flags, arch: opts.arch }), exe);
+      copyFileSync(sliceExe, built);
       last = built;
     }
     if (opts.arch) {

@@ -136,11 +136,19 @@ function writeBundledRenderJs(outDir: string): void {
   if (!template.includes(scriptsMarker)) {
     throw new Error(`${join(docsDir, "gen_docs.render.js")} missing ${scriptsMarker}`);
   }
-  const scriptsHash = createHash("sha1")
-    .update(readFileSync(join(".work", "scripts.js")))
-    .digest("hex")
-    .slice(0, 4);
-  const scriptsURL = `https://www.sumatrapdfreader.org/docs/all-scripts-${scriptsHash}.js`;
+  // .work/scripts.js is produced by genPDFScripts() from the private
+  // sumatra-website checkout. A fresh clone of this fork has neither, so treat
+  // it as optional: the URL only fills a data attribute on the script-examples
+  // page, and the template's own default is the empty string.
+  const scriptsPath = join(".work", "scripts.js");
+  let scriptsURL = "";
+  if (existsSync(scriptsPath)) {
+    const scriptsHash = createHash("sha1").update(readFileSync(scriptsPath)).digest("hex").slice(0, 4);
+    scriptsURL = `https://www.sumatrapdfreader.org/docs/all-scripts-${scriptsHash}.js`;
+  } else {
+    console.log("gen-docs: '.work/scripts.js' missing (needs the sumatra-website scripts checkout);" +
+      " PDF script examples will render without a source URL");
+  }
   const bundle =
     "const kCommandsSearchHtml = " +
     JSON.stringify(searchHtml) +
