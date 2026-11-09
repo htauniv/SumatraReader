@@ -70,7 +70,7 @@ bash tools/ocr_endtoend_test.sh <某本书.pdf>            # OCR 端到端：渲
 python3 tools/make_translations.py /tmp/trans_cn.json  # 从 apptranslator 历史重建翻译表
 ```
 
-`verify_build.py` 的架构断言跟着 `--archs` 走（37 项检查其余部分与架构无关），
+`verify_build.py` 的架构断言跟着 `--archs` 走（39 项检查其余部分与架构无关），
 所以同一套检查可以分别对单切片和 universal 包执行。它会比对 `lipo -archs`、
 `file` 的描述、`minos`，以及 `.app` 内那份二进制是否与 `out/mac/rel/SumatraReader`
 切片一致——这份一致性很容易在重新打包时被漏掉。
@@ -78,6 +78,15 @@ python3 tools/make_translations.py /tmp/trans_cn.json  # 从 apptranslator 历�
 `make_translations.py` 用公开接口 `https://www.apptranslator.org/api/transhist?app=SumatraPDF&lang=cn`
 取翻译数据（先自行下载为 JSON）。它按源码中实际存在的 `Tr()` 字面量匹配；产品名改名后的词条
 会自动复用上游同名中文翻译并替换品牌，不会因改名丢中文。
+
+仓库里提交了一份可直接使用的翻译表 `docs/translations-en-cn.txt`（1208 组，58 KB），
+所以**干净 clone 不设 `TRANS_UPLOAD_SECRET` 也能编出完整中文界面**：打包时若
+`.work/translations.txt` 不存在（`.work/` 从不入库），就从这份快照播种；本地已有的
+`.work/translations.txt` 优先，不影响重新生成。要更新翻译，用 `make_translations.py`
+重新生成后覆盖该快照，`verify_build.py` 会断言仓库快照与内嵌表逐字节一致，两者不会悄悄分叉。
+
+`.work/scripts.js`（PDF 脚本示例的源码链接）来自私有的 `sumatra-website` 检出，缺它时
+gen-docs 会留空的示例 URL 并打印提示，而不是让构建失败——全新 clone 没有这个检出。
 
 ## 界面语言的判定顺序
 

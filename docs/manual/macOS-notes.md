@@ -34,11 +34,12 @@ Apple Silicon Macs each run natively with no Rosetta 2 involved.
 ## 中文字体 / Chinese fonts
 
 中文界面由 CoreText 自动回退到 `.PingFang UI SC`（实测），不需要额外字体即可显示中文。
-CJK 文档内嵌字体缺失时，程序仍会按需下载 Noto CJK 回退字体（与上游原版行为一致）。
+CJK 文档内嵌字体缺失时，程序仍会按需下载 **Source Han Serif（思源宋体，
+`SourceHanSerif-Regular.ttc`，约 24 MB）** 作为回退字体，与上游原版行为一致（`src/shared/mupdf/fonts_map.c`）。
 
 Chinese UI text is rendered via CoreText's automatic cascade to `.PingFang UI SC`; no extra font
-install is needed. PDFs that lack embedded CJK fonts may still trigger the app's on-demand
-Noto CJK font download, as in the original build.
+install is needed. PDFs that lack embedded CJK fonts may still trigger a one-time download of
+Source Han Serif (~24 MB), as in the original build.
 
 ## 签名 / Code signing
 

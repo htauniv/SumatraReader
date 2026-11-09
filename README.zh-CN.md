@@ -65,7 +65,7 @@ SumatraReader 把这三处修好。第 2、3 条已[反馈给上游](https://git
 
 ## 当前状态
 
-自动验证已通过：`tools/verify_build.py` 的全部 37 项静态检查（双架构、`minos 13.0`、bundle 身份、签名、翻译表 1208 键、内置手册 41 个归档条目及其与 `docs/manual/` 的逐字节一致）、翻译子系统运行时测试（17 个 locale 用例）、新增菜单词条的中文化、真书打开无崩溃，以及 Vision OCR 端到端测试（真实书页识别出 37 行中文）。
+自动验证已通过：`tools/verify_build.py` 的全部 39 项静态检查（双架构、`minos 13.0`、bundle 身份、签名、翻译表 1208 键且与仓库内快照一致、内置手册 41 个归档条目及其与 `docs/manual/` 的逐字节一致）、翻译子系统运行时测试（17 个 locale 用例）、新增菜单词条的中文化、真书打开无崩溃，以及 Vision OCR 端到端测试（真实书页识别出 37 行中文）。
 
 仍需人工验证：GUI 菜单点击全流程、AI 目录（需真实 API key）、词典查询（需真实 StarDict 词典文件）、arm64 切片在 Apple Silicon 实机上的运行（本机为 Intel，只验证到 `lipo` 架构正确、两切片 `minos` 一致、静态检查全过）。
 

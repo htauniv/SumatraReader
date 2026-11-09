@@ -40,11 +40,20 @@ Chinese system will still start in Chinese. Pick the language once in
 ## 中文显示为方块 / Chinese text shows as boxes
 
 界面文字走 CoreText，实测会自动回退到 `.PingFang UI SC`。如果 PDF 正文的中文缺字，
-那是文档没有内嵌 CJK 字体，程序会在首次使用时下载 Noto 回退字体，需要一次联网。
-下载状态可在设置/日志相关界面查看。
+那是文档没有内嵌 CJK 字体，程序会在首次使用时下载 **Source Han Serif（思源宋体，
+`SourceHanSerif-Regular.ttc`，约 24 MB）** 作为回退，需要一次联网。
+
+首次下载时 macOS 会弹出「SumatraReader 想连接到 files.sumatrapdfreader.org」并要求确认，
+这是系统的**网络访问授权**提示，不是应用在采集数据。本构建只有 ad-hoc 签名（无开发者
+身份），所以系统会同时显示「Suspicious package」字样。点「允许」即可，字体只下载一次
+并缓存，之后离线可用。若不想联网：把该字体放进缓存目录，或放弃对无内嵌字体的扫描件的
+中文回退。
 
 UI text uses CoreText's font cascade and should never be boxes. Missing glyphs inside a PDF mean
-the document lacks an embedded CJK font; SumatraReader downloads a Noto fallback on first use.
+the document lacks an embedded CJK font; SumatraReader downloads Source Han Serif (~24 MB) once.
+macOS will ask for permission to reach `files.sumatrapdfreader.org` at that moment, and flags the
+ad-hoc signed build as a "suspicious package" - that is the OS network prompt, not telemetry.
+Allow it once; the font is cached and later opens work offline.
 
 ## 手册打开后跳到浏览器 / Help opens a browser
 
