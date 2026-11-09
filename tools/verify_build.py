@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""Static verification for the locally built SumatraReader.app (Intel, macOS 13+).
+"""Static verification for the locally built SumatraReader.app (macOS 13+).
 
 Checks the things that are easy to get silently wrong in a from-source build:
-  * Mach-O architecture and, critically, LC_BUILD_VERSION/minos
+  * Mach-O architecture slices and, critically, LC_BUILD_VERSION/minos
   * the .app bundle's Info.plist keys and ad-hoc signature
   * the embedded translation archive and its language set
-  * the offline in-app manual (manifest + packed archive entries)
+  * the offline in-app manual (manifest, packed archive entries, and whether
+    the staged pages still match docs/manual/)
   * the compiled language table (en + cn only)
   * unguarded-availability warnings left in the build log
   * imported symbols that would require a newer macOS at launch
 
-Usage: python3 tools/verify_build.py [--build-log /tmp/sumatra_build13.log]
+Usage: python3 tools/verify_build.py [--build-log .work/build.log]
+                                    [--archs x86_64,arm64]
+
+--archs defaults to x86_64 and states which slices the build produced, so the
+same checks run against an Intel-only build, a single arm64 build or a
+universal one.
 """
 
 import argparse
@@ -218,6 +224,28 @@ def main():
         check("manual manifest resolves", len(pages) >= 5 and not missing,
               f"{len(pages)} pages, {len(missing)} missing")
         check("manual shell staged", os.path.isfile(os.path.join(manual_dir, "manual.shell.html")), "manual.shell.html")
+
+        # Editing a page in docs/manual without rebuilding leaves the app
+        # showing the previous text, which reads like a documentation bug
+        # rather than a stale build. gen-docs copies the pages verbatim, so
+        # the two must be byte-identical.
+        stale = [md for md in sorted(pages.values())
+                 if os.path.isfile(os.path.join(MANUAL_SRC, md))
+                 and open(os.path.join(MANUAL_SRC, md), "rb").read()
+                 != open(os.path.join(manual_dir, md), "rb").read()]
+        check("staged manual matches docs/manual", not stale,
+              ("stale, rebuild needed: " + ", ".join(stale)) if stale
+              else f"{len(pages)} pages identical")
+
+        # same for the archive itself: MakeLZSA stamps it at pack time, so an
+        # archive older than a staged page predates the manual it should carry
+        if os.path.isfile(ARCHIVE):
+            newest = max(os.path.getmtime(os.path.join(manual_dir, f))
+                         for f in os.listdir(manual_dir)
+                         if os.path.isfile(os.path.join(manual_dir, f)))
+            check("embedded archive newer than the manual",
+                  os.path.getmtime(ARCHIVE) >= newest,
+                  f"archive {os.path.getmtime(ARCHIVE):.0f} vs manual {newest:.0f}")
     else:
         check("manual manifest present", False, manifest)
 

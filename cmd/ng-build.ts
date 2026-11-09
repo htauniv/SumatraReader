@@ -10,7 +10,7 @@
 //   bun cmd/ng-build.ts -dbg -clean -v        # wipe output dir first, echo commands
 //   bun cmd/ng-build.ts -all -rel             # every target for this platform
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { cpus } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { emsdkRoots, findToolchain, hostPlatform, type Platform } from "./helper/ng-toolchain";
@@ -360,6 +360,20 @@ async function main(): Promise<void> {
     } else if (opts.arch) {
       built = join(outDir(plat, { ...flags, arch: opts.arch }), exe);
       last = built;
+    }
+    if (opts.arch) {
+      // The embedded archive and its staging dir are per-slice (they are link
+      // inputs), but out/mac/rel is what a release ships and what
+      // tools/verify_build.py reads. Left alone, a slice build keeps whatever
+      // archive the last non-slice build put there, and it goes stale silently.
+      const src = outDir(plat, { ...flags, arch: opts.arch === "universal" ? "x86_64" : opts.arch });
+      const dst = outDir(plat, flags);
+      for (const name of ["embedded.lzsa", "embedded.o"]) {
+        const f = join(src, name);
+        if (existsSync(f)) copyFileSync(f, join(dst, name));
+      }
+      const staged = join(src, "embedded");
+      if (existsSync(staged)) cpSync(staged, join(dst, "embedded"), { recursive: true, force: true });
     }
     console.log(`bundle ${relative(root, makeMacBundle(root, built, ngVersion(flags.rev).ver))}`);
   }
