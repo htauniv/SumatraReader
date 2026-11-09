@@ -1542,7 +1542,10 @@ static void InstallNativeMenu(MainWindow* win) {
     n++;
 
     gp::MenuDef windowDef = {};
-    windowDef.name = GStrL("Window");
+    // Every other top-level menu comes from the menu model, whose titles are
+    // Tr()'d; this one is built here, so it needs the translation applied by
+    // hand or it stays English in a Chinese UI.
+    windowDef.name = ToGpui(Tr("&Window"));
     bool windowPlaced = false;
     for (const MenuItemModel& it : win->menu->items) {
         if (!it.submenu) {
