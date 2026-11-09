@@ -67,6 +67,8 @@ Upstream names are deliberately preserved where they are not user-facing: copyri
 
 Automated verification passes: all 39 static checks in `tools/verify_build.py` (both architectures, `minos 13.0`, bundle identity, signature, 1,208 translation keys matching the committed snapshot, 41 embedded manual entries plus byte-identical staging against `docs/manual/`), the translation runtime test (17 locale cases), Chinese strings for all newly added menu items, real books opened without crashes, and an end-to-end Vision OCR test that recognised 37 lines of Chinese on a real page.
 
+Also verified by **cloning the published repository and running the documented build command** (744 s, x86_64 slice): the result passes the same 39/39, and the app starts with a Chinese menu bar, Chinese table-of-contents sidebar and rendered pages. That check earned its keep — it caught two problems that only appear on another machine (a missing `sumatra-website` checkout aborting the build, and a single-slice `.app` landing outside the release dir).
+
 Still needs human verification: GUI menu clicks end to end, AI table of contents with a real API key, dictionary lookup with a real StarDict dictionary, and the arm64 slice running on real Apple Silicon — this machine is Intel, so arm64 is verified only as far as `lipo -archs`, matching `minos` on both slices, and the full static check suite.
 
 Not supported yet: macOS 27, languages other than en/cn, Windows. These are candidates for later work, not promises.
