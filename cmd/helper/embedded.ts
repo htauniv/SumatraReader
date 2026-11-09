@@ -76,7 +76,20 @@ export async function packEmbedded(
     for (const src of filesUnder(docs)) inputs.set(relative(docs, src), src);
   }
   const translations = join(inputRoot, ".work/translations.txt");
-  if (!existsSync(translations)) writeChanged(translations, "");
+  if (!existsSync(translations)) {
+    // .work/ is generated and absent in a fresh clone. Upstream packs an empty
+    // table in that case, and an empty table is indistinguishable at run time
+    // from "the language switch does nothing", so seed from the snapshot this
+    // fork ships instead.
+    const shipped = join(inputRoot, "docs", "translations-en-cn.txt");
+    mkdirSync(dirname(translations), { recursive: true });
+    if (existsSync(shipped)) {
+      copyFileSync(shipped, translations);
+      console.log(`translations: no .work/translations.txt, seeded from ${relative(root, shipped)}`);
+    } else {
+      writeChanged(translations, "");
+    }
+  }
   inputs.set("translations.txt", translations);
   for (const name of extScripts) inputs.set(name, join(inputRoot, "ext", name));
   if (opts.fonts) {

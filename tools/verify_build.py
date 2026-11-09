@@ -199,6 +199,24 @@ def main():
     else:
         check("staged translations present", False, TRANSLATIONS)
 
+    # A fresh clone has no .work/ (generated), and upstream reacts to that by
+    # packing an empty translation table - the exact failure this fork exists to
+    # fix. The pack step falls back to a snapshot committed under docs/, so that
+    # file has to be there and has to be what actually got embedded; otherwise
+    # the fallback is either missing or silently out of date.
+    SNAPSHOT = os.path.join(REPO, "docs", "translations-en-cn.txt")
+    if os.path.isfile(SNAPSHOT):
+        snap = open(SNAPSHOT, "rb").read()
+        check("translation snapshot shipped with the repo", len(snap) > 10000,
+              f"{len(snap)} bytes, docs/translations-en-cn.txt")
+        if os.path.isfile(TRANSLATIONS):
+            staged = open(TRANSLATIONS, "rb").read()
+            check("embedded translations match the shipped snapshot", snap == staged,
+                  "identical" if snap == staged
+                  else "docs/translations-en-cn.txt is stale, copy .work/translations.txt over it")
+    else:
+        check("translation snapshot shipped with the repo", False, SNAPSHOT)
+
     if os.path.isfile(ARCHIVE):
         mk = os.path.join(REL, "MakeLZSA")
         if os.path.isfile(mk):
